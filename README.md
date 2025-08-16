@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-# TFGRecuBack
-Repositorio back de la recuperación del TFG
-=======
 #ESTA TODO EN LOCAL ASÍ QUE HAY QUE HACER ESTO
 
 
@@ -23,4 +19,3 @@ Para crear la database hay que ir al archivo "GatosMySQL.sql" y pegar el conteni
  Eliminar DB
  
  DROP DATABASE GatosDB;
->>>>>>> master
