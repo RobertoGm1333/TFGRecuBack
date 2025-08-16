@@ -1,0 +1,6 @@
+@adoptaragon_HostAddress = http://localhost:5167
+
+GET {{adoptaragon_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
