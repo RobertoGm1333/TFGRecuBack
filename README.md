@@ -18,4 +18,4 @@ Para crear la database hay que ir al archivo "GatosMySQL.sql" y pegar el conteni
  
  Eliminar DB
  
- DROP DATABASE GatosDB;
+ DROP DATABASE GatosDB; 
