@@ -26,9 +26,13 @@ namespace ProtectoraAPI.Repositories
         private readonly int _maxReturned;      // nº máx. por página
         private readonly int _maxContextCats;   // nº máx. en contexto LLM
 
-        // Tu API
+        // API Gatos
         private readonly string _apiBase;
         private readonly string _listEndpoint;
+
+        // API Protectoras
+        private readonly string _protBase;
+        private readonly string _protEndpoint;
 
         // Greeting
         private readonly string _greeting;
@@ -39,11 +43,14 @@ namespace ProtectoraAPI.Repositories
         private static readonly Regex _masOpcionesRegex = new(@"\b(m[aá]s opciones|dame m[aá]s|m[aá]s resultados|siguientes|m[aá]s sugerencias)\b",
                                                               RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-        // MENSAJE ADITIVO (mejorado: permite “además/también” en cualquier lugar y “y …” al inicio)
-        private static readonly Regex _aditivoRegex = new(
-            @"(^\s*y(\s+que)?\b)|(\badem[aá]s\b)|(\btamb[ií]en\b)",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-        );
+        // MENSAJE ADITIVO (para fusionar filtros)
+        private static readonly Regex _aditivoRegex = new(@"(^\s*y(\s+que)?\b)|(\badem[aá]s\b)|(\btamb[ií]en\b)",
+                                                          RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        // Disparadores de “protectora”
+        private static readonly Regex _rxProtectora = new(
+            @"\b(qu[ié]n(es)?\s+son|qui[eé]nes\s+son|h[aá]blame\s+de|qu[eé]\s+es|info(?:rmaci[oó]n)?\s+de)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         // COLORES/RAZAS base + alias y plurales
         private static readonly Dictionary<string, string[]> COLORES_ALIASES = new()
@@ -62,7 +69,7 @@ namespace ProtectoraAPI.Repositories
             ["blanco y negro"]   = new[] { "blanco y negro",   "negro y blanco", "b/n" },
         };
 
-        // Umbrales fuzzy base
+        // Umbrales fuzzy
         private const int MAX_EDITS_NOMBRE = 2;
         private const double MIN_SIMILARITY = 0.66;
 
@@ -80,10 +87,10 @@ namespace ProtectoraAPI.Repositories
             _cfg  = cfg;
             _cache = cache;
 
-            _ollamaBase   = cfg["Ollama:BaseUrl"]     ?? "http://localhost:11434";
-            _ollamaModel  = cfg["Ollama:Model"]       ?? "llama3.1:8b";
+            _ollamaBase   = cfg["Ollama:BaseUrl"]      ?? "http://localhost:11434";
+            _ollamaModel  = cfg["Ollama:Model"]        ?? "llama3.1:8b";
             _systemPrompt = cfg["Ollama:SystemPrompt"] ??
-                            "Eres Catherine, una asistente para recomendar gatos en adopción. Responde en español, breve y clara.";
+                            "Eres Catherine, una asistente para recomendar gatos en adopción y dar información de protectoras. Responde en español, breve y clara.";
 
             _rules = cfg["Catherine:Rules"] ?? "- Sé concisa y no inventes datos.";
 
@@ -91,10 +98,13 @@ namespace ProtectoraAPI.Repositories
             _maxContextCats = int.TryParse(cfg["Catherine:MaxContextCats"], out var mc) ? Math.Max(1, mc) : 80;
 
             _greeting = cfg["Catherine:Greeting"]
-                        ?? "¡Hola! Soy Catherine 🐾 ¿Buscas algún tipo de gato en concreto? (color/raza, edad o sexo).";
+                        ?? "¡Hola! Soy Catherine 🐾 ¿Buscas algún tipo de gato o información de alguna protectora?";
 
-            _apiBase      = cfg["CatalogApi:BaseUrl"]      ?? "http://localhost:5167";
-            _listEndpoint = cfg["CatalogApi:ListEndpoint"] ?? "/api/Gato";
+            _apiBase      = cfg["CatalogApi:BaseUrl"]       ?? "http://localhost:5167";
+            _listEndpoint = cfg["CatalogApi:ListEndpoint"]  ?? "/api/Gato";
+
+            _protBase     = cfg["ProtectoraApi:BaseUrl"]    ?? "http://localhost:5167";
+            _protEndpoint = cfg["ProtectoraApi:ListEndpoint"] ?? "/api/Protectora";
         }
 
         public async Task<Catherine> ProcesarAsync(string mensaje)
@@ -104,6 +114,11 @@ namespace ProtectoraAPI.Repositories
                 return new Catherine { Pregunta = mensaje, Respuesta = _greeting, Resultados = new List<Gato>() };
             }
 
+            // 1) ¿Pregunta por protectoras?
+            if (await IntentaResponderProtectoraAsync(mensaje) is Catherine respProt)
+                return respProt;
+
+            // 2) Flujo normal de gatos
             var todos = await ObtenerTodosLosGatosAsync();
             var idxNombres = ObtenerIndiceNombres(todos);
 
@@ -197,12 +212,11 @@ namespace ProtectoraAPI.Repositories
                 return new Catherine { Pregunta = mensaje, Respuesta = sb.ToString().Trim(), Resultados = new List<Gato>() };
             }
 
-            // Preferencias (color/edad/sexo) — con fusión si el mensaje es aditivo (mejor detectado)
+            // Preferencias (color/edad/sexo) — con fusión si el mensaje es aditivo
             if (TryParsePreferenciasFuzzy(mensaje, out var prefDetectada))
             {
                 Preferencias prefAUsar = prefDetectada;
 
-                // Si parece aditivo y tenemos una preferencia anterior, fusionamos
                 if (_aditivoRegex.IsMatch(mensaje) &&
                     _cache.TryGetValue(CACHE_LAST_PREFS, out Preferencias? lastPref) && lastPref != null)
                 {
@@ -232,7 +246,7 @@ namespace ProtectoraAPI.Repositories
                 };
             }
 
-            // Fallback LLM
+            // Fallback LLM (solo texto natural)
             var todosCtx = todos.Take(_maxContextCats)
                                 .Select(g => $"- Nombre:{g.Nombre_Gato} | Raza:{g.Raza} | Edad:{g.Edad} | Sexo:{g.Sexo}")
                                 .ToList();
@@ -260,7 +274,99 @@ namespace ProtectoraAPI.Repositories
             return new Catherine { Pregunta = mensaje, Respuesta = respuesta.Trim(), Resultados = new List<Gato>() };
         }
 
-        // ---------- Infra ----------
+        // ---------- PROTECTORAS ----------
+
+        private async Task<Catherine?> IntentaResponderProtectoraAsync(string mensaje)
+        {
+            // Si el texto contiene disparadores o parece contener un nombre de protectora, probamos
+            var mNorm = Norm(mensaje);
+            bool hayTrigger = _rxProtectora.IsMatch(mensaje) || mNorm.Contains("protectora") || mNorm.Contains("asociacion") || mNorm.Contains("asociación");
+
+            var protectorAs = await ObtenerTodasProtectorasAsync();
+            if (!protectorAs.Any()) return null;
+
+            // índice por nombre
+            var idx = protectorAs
+                .Where(p => !string.IsNullOrWhiteSpace(p.Nombre_Protectora))
+                .ToDictionary(p => Norm(p.Nombre_Protectora!), p => p);
+
+            // 1) búsqueda exacta/fuzzy del nombre dentro del mensaje
+            var posibles = new List<Protectora>();
+            var tokens = mNorm.Split(new[] { ' ', ',', '.', ';', ':', '?', '!' }, StringSplitOptions.RemoveEmptyEntries)
+                              .Where(t => t.Length > 1)
+                              .ToList();
+
+            foreach (var token in tokens)
+            {
+                if (idx.TryGetValue(token, out var p1))
+                {
+                    if (!posibles.Contains(p1)) posibles.Add(p1);
+                    continue;
+                }
+
+                var best = BestMatch(token, idx.Keys, MAX_EDITS_NOMBRE, MIN_SIMILARITY);
+                if (best.HasValue && idx.TryGetValue(Norm(best.Value.match), out var pf))
+                {
+                    if (!posibles.Contains(pf)) posibles.Add(pf);
+                }
+            }
+
+            // Si no hay match por tokens pero hay trigger, intenta un fuzzy global con todo el texto
+            if (!posibles.Any() && hayTrigger)
+            {
+                var bestGlobal = BestMatch(mNorm, idx.Keys, 3, 0.55);
+                if (bestGlobal.HasValue && idx.TryGetValue(Norm(bestGlobal.Value.match), out var pglobal))
+                    posibles.Add(pglobal);
+            }
+
+            if (!posibles.Any()) return null;
+
+            // Tomamos la mejor (o varias) pero respondemos solo sobre una para ser concisos
+            var protectora = posibles.First();
+
+            // Gatos de esa protectora (filtrando de la lista completa por Id_Protectora)
+            var gatos = await ObtenerTodosLosGatosAsync();
+            var deEsa = gatos.Where(g => g.Id_Protectora == protectora.Id_Protectora)
+                             .OrderBy(g => g.Edad)
+                             .Take(2)
+                             .ToList();
+
+            var respuesta = FormatearInfoProtectora(protectora, deEsa);
+            return new Catherine
+            {
+                Pregunta = mensaje,
+                Respuesta = respuesta,
+                Resultados = new List<Gato>()
+            };
+        }
+
+        private static string FormatearInfoProtectora(Protectora p, List<Gato> gatos)
+        {
+            // Ciudad: usamos el campo Direccion (en tu BBDD es la ciudad) tal cual
+            var ciudad = string.IsNullOrWhiteSpace(p.Direccion) ? "—" : p.Direccion.Trim();
+            var resumen = string.IsNullOrWhiteSpace(p.Descripcion_Protectora)
+                ? "No tenemos una descripción disponible por ahora."
+                : p.Descripcion_Protectora.Trim();
+
+            var sb = new StringBuilder();
+            sb.Append($"{p.Nombre_Protectora} está en {ciudad}. ");
+            sb.Append(resumen);
+
+            if (gatos.Any())
+            {
+                sb.Append(" Algunos gatos que tienen ahora mismo son: ");
+                sb.Append(string.Join(", ", gatos.Select(g => g.Nombre_Gato)));
+                sb.Append(".");
+            }
+            else
+            {
+                sb.Append(" Ahora mismo no he encontrado gatos asociados en la base de datos.");
+            }
+
+            return sb.ToString();
+        }
+
+        // ---------- Infra común ----------
 
         private bool EsSaludo(string texto) => _saludoRegex.IsMatch(texto ?? "");
         private bool EsMasOpciones(string texto) => _masOpcionesRegex.IsMatch(texto ?? "");
@@ -277,6 +383,18 @@ namespace ProtectoraAPI.Repositories
             return res;
         }
 
+        private async Task<List<Protectora>> ObtenerTodasProtectorasAsync()
+        {
+            const string cacheKey = "PROTECTORAS_ALL";
+            if (_cache.TryGetValue(cacheKey, out List<Protectora>? cached) && cached != null)
+                return cached;
+
+            var url = $"{_protBase.TrimEnd('/')}{_protEndpoint}";
+            var res = await _http.GetFromJsonAsync<List<Protectora>>(url) ?? new List<Protectora>();
+            _cache.Set(cacheKey, res, TimeSpan.FromMinutes(30));
+            return res;
+        }
+
         private async Task<string> ChatOllamaAsync(string userMessage, string context)
         {
             var keepAlive = _cfg["Ollama:KeepAlive"] ?? "10m";
@@ -287,7 +405,7 @@ namespace ProtectoraAPI.Repositories
                 messages = new object[]
                 {
                     new { role = "system", content = _systemPrompt },
-                    new { role = "user",   content = $"{userMessage}\n\n---\n{context}\n\nRedacta 1 párrafo claro, en frases naturales (\"Nombre es macho/hembra, tiene X años y es de raza Y\"). Sin descripciones y sin puntos suspensivos." }
+                    new { role = "user",   content = $"{userMessage}\n\n---\n{context}\n\nRedacta 1 párrafo claro, en frases naturales (\"Nombre es macho/hembra, tiene X años y es de raza Y\"). Sin descripciones largas y sin puntos suspensivos." }
                 },
                 stream = false,
                 keep_alive = keepAlive,
@@ -505,7 +623,6 @@ namespace ProtectoraAPI.Repositories
 
         private static Preferencias MergePreferencias(Preferencias basePref, Preferencias delta)
         {
-            // Regla: lo nuevo que venga NO nulo sobrescribe/añade.
             var color = !string.IsNullOrWhiteSpace(delta.Color) ? delta.Color : basePref.Color;
             var edad  = !string.IsNullOrWhiteSpace(delta.RangoEdad) ? delta.RangoEdad : basePref.RangoEdad;
             var sexo  = !string.IsNullOrWhiteSpace(delta.Sexo) ? delta.Sexo : basePref.Sexo;
