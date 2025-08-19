@@ -52,6 +52,14 @@ namespace ProtectoraAPI.Repositories
             @"\b(qu[ié]n(es)?\s+son|qui[eé]nes\s+son|h[aá]blame\s+de|qu[eé]\s+es|info(?:rmaci[oó]n)?\s+de)\b",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
+// >>> NUEVO: intención "¿a qué protectora pertenece X?"
+private static readonly Regex _rxPerteneceProtectora = new(
+    @"(a\s*qu[eé]\s*protectora\s*pertenece
+     |de\s*qu[eé]\s*protectora\s*(es|pertenece)
+     |a\s*qu[ié]\s*asociaci[oó]n\s*pertenece
+     |a\s*qui[eé]n\s*pertenece
+     |de\s*qui[eé]n\s*es)",
+    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.IgnorePatternWhitespace);
         // COLORES/RAZAS base + alias y plurales
         private static readonly Dictionary<string, string[]> COLORES_ALIASES = new()
         {
@@ -111,6 +119,14 @@ namespace ProtectoraAPI.Repositories
         {
             if (EsSaludo(mensaje))
                 return new Catherine { Pregunta = mensaje, Respuesta = _greeting, Resultados = new List<Gato>() };
+
+            // >>> NUEVO: “¿a qué protectora pertenece X?”  (resolver antes que todo)
+            if (_rxPerteneceProtectora.IsMatch(mensaje))
+            {
+                var resPert = await ResolverProtectoraDeGatoAsync(mensaje);
+                if (resPert is not null) return resPert;
+                // si no lo encontramos, seguimos con el flujo normal
+            }
 
             // 1) ¿Pregunta por protectoras?
             var prot = await IntentaResponderProtectoraAsync(mensaje);
@@ -293,28 +309,7 @@ namespace ProtectoraAPI.Repositories
                 .Select(p => p.Nombre_Protectora!.Trim())
                 .ToList();
 
-            // **NUEVO PASO 0**: fuzzy por subcadenas (n-grams) del mensaje -> nombre completo
-            // Captura casos como "bigotes calllejeros" ~= "Bigotes Callejeros"
-            var chunks = BuildCandidateChunks(mNorm, 4);
-            var bestFromChunks = BestMatchFromChunks(chunks, nombresCanon, 3, 0.55);
-            if (bestFromChunks.HasValue)
-            {
-                var p0 = protectorAs.First(x => Norm(x.Nombre_Protectora!) == Norm(bestFromChunks.Value.match));
-                var gatos0 = await ObtenerTodosLosGatosAsync();
-                var deEsa0 = gatos0.Where(g => g.Id_Protectora == p0.Id_Protectora)
-                                   .OrderBy(g => g.Edad)
-                                   .Take(2)
-                                   .ToList();
-
-                return new Catherine
-                {
-                    Pregunta = mensaje,
-                    Respuesta = FormatearInfoProtectora(p0, deEsa0),
-                    Resultados = new List<Gato>()
-                };
-            }
-
-            // 1) coincidencia directa por substring del nombre completo
+            // 1) coincidencia directa por substring del nombre completo (case-insensitive por Norm)
             foreach (var nombre in nombresCanon)
             {
                 if (mNorm.Contains(Norm(nombre)))
@@ -335,7 +330,7 @@ namespace ProtectoraAPI.Repositories
                 }
             }
 
-            // 2) fuzzy por nombre completo (si hay disparador)
+            // 2) fuzzy por nombre completo (solo si hay disparador explícito)
             if (hayTrigger)
             {
                 var bestGlobal = BestMatch(mNorm, nombresCanon, 3, 0.55);
@@ -357,30 +352,55 @@ namespace ProtectoraAPI.Repositories
                 }
             }
 
-            // 3) fuzzy por tokens -> resolver a nombre completo
-            var idx = protectorAs
-                .Where(p => !string.IsNullOrWhiteSpace(p.Nombre_Protectora))
-                .ToDictionary(p => Norm(p.Nombre_Protectora!), p => p);
+            // 3) NUEVO: fuzzy por tokens del nombre de la protectora
+            //    - Compara cada palabra del nombre de la protectora con las palabras del mensaje
+            //    - Requiere >=2 tokens si el nombre tiene 2+ palabras; si solo tiene 1 palabra, con 1 basta.
+            var tokensMsg = mNorm.Split(new[] { ' ', ',', '.', ';', ':', '?', '!' }, StringSplitOptions.RemoveEmptyEntries)
+                                 .Where(t => t.Length > 1)
+                                 .ToList();
 
-            var posibles = new List<Protectora>();
-            var tokens = mNorm.Split(new[] { ' ', ',', '.', ';', ':', '?', '!' }, StringSplitOptions.RemoveEmptyEntries)
-                              .Where(t => t.Length > 1)
-                              .ToList();
+            Protectora? mejor = null;
+            double mejorScore = 0.0;
 
-            foreach (var token in tokens)
+            foreach (var p in protectorAs.Where(p => !string.IsNullOrWhiteSpace(p.Nombre_Protectora)))
             {
-                var best = BestMatch(token, idx.Keys, MAX_EDITS_NOMBRE, MIN_SIMILARITY);
-                if (best.HasValue && idx.TryGetValue(Norm(best.Value.match), out var pTok))
+                var nameTokens = Norm(p.Nombre_Protectora!).Split(new[] { ' ', '-', '_' }, StringSplitOptions.RemoveEmptyEntries)
+                                                           .Where(t => t.Length > 1)
+                                                           .ToList();
+                if (!nameTokens.Any()) continue;
+
+                int requeridos = nameTokens.Count >= 2 ? 2 : 1;
+
+                int aciertos = 0;
+                double sumScore = 0.0;
+
+                foreach (var nt in nameTokens)
                 {
-                    if (!posibles.Contains(pTok)) posibles.Add(pTok);
+                    var hit = BestMatch(nt, tokensMsg, MAX_EDITS_NOMBRE, MIN_SIMILARITY);
+                    if (hit.HasValue)
+                    {
+                        aciertos++;
+                        sumScore += hit.Value.score;
+                    }
+                }
+
+                if (aciertos >= requeridos)
+                {
+                    // puntuamos por nº de aciertos y media de similitud
+                    double media = sumScore / aciertos;
+                    double score = aciertos + media; // simple ranking estable
+                    if (score > mejorScore)
+                    {
+                        mejorScore = score;
+                        mejor = p;
+                    }
                 }
             }
 
-            if (posibles.Any())
+            if (mejor != null)
             {
-                var p = posibles.First();
                 var gatos = await ObtenerTodosLosGatosAsync();
-                var deEsa = gatos.Where(g => g.Id_Protectora == p.Id_Protectora)
+                var deEsa = gatos.Where(g => g.Id_Protectora == mejor.Id_Protectora)
                                  .OrderBy(g => g.Edad)
                                  .Take(2)
                                  .ToList();
@@ -388,11 +408,12 @@ namespace ProtectoraAPI.Repositories
                 return new Catherine
                 {
                     Pregunta = mensaje,
-                    Respuesta = FormatearInfoProtectora(p, deEsa),
+                    Respuesta = FormatearInfoProtectora(mejor, deEsa),
                     Resultados = new List<Gato>()
                 };
             }
 
+            // 4) (si nada encaja) null => el flujo seguirá con gatos
             return null;
         }
 
@@ -571,41 +592,6 @@ namespace ProtectoraAPI.Repositories
             }
             if (best.score <= 0 || best.edits == int.MaxValue) return null;
             return (best.opt, best.score);
-        }
-
-        // ---------- NUEVO: utilidades para fuzzy en protectorAs ----------
-
-        // Genera subcadenas (n-grams) de 1..maxN palabras a partir del mensaje normalizado
-        private static List<string> BuildCandidateChunks(string normalizedMessage, int maxN = 4)
-        {
-            var parts = normalizedMessage.Split(new[] { ' ', ',', '.', ';', ':', '?', '!' }, StringSplitOptions.RemoveEmptyEntries)
-                                         .Where(t => t.Length > 0)
-                                         .ToList();
-            var chunks = new List<string>();
-            for (int n = 1; n <= maxN; n++)
-            {
-                for (int i = 0; i + n <= parts.Count; i++)
-                {
-                    chunks.Add(string.Join(" ", parts.Skip(i).Take(n)));
-                }
-            }
-            return chunks;
-        }
-
-        // Busca el mejor nombre de protectora comparando todas las subcadenas del mensaje con los nombres canónicos
-        private static (string match, double score)? BestMatchFromChunks(List<string> chunks, IEnumerable<string> options, int maxEdits, double minScore)
-        {
-            (string match, double score)? best = null;
-            foreach (var ch in chunks)
-            {
-                var bm = BestMatch(ch, options, maxEdits, minScore);
-                if (bm.HasValue)
-                {
-                    if (!best.HasValue || bm.Value.score > best.Value.score)
-                        best = bm;
-                }
-            }
-            return best;
         }
 
         // ---------- Nombres ----------
@@ -844,6 +830,58 @@ namespace ProtectoraAPI.Repositories
             if (!string.IsNullOrEmpty(texto) && !texto.EndsWith(".")) texto += ".";
 
             return $"El gato {g.Nombre_Gato} es {sexo}, tiene {edad} y es de raza {raza}. {texto}";
+        }
+
+        // >>> NUEVO: resolver "¿a qué protectora pertenece X?"
+        private async Task<Catherine?> ResolverProtectoraDeGatoAsync(string mensaje)
+        {
+            // 1) buscamos el gato por nombre con fuzzy (y usamos el último si existiera)
+            var gatos = await ObtenerTodosLosGatosAsync();
+            var idxNombres = ObtenerIndiceNombres(gatos);
+            var candidatos = BuscarGatosPorNombreFuzzy(gatos, idxNombres, mensaje).ToList();
+
+            if (!candidatos.Any() && _cache.TryGetValue(CACHE_LAST_CAT, out Gato? ultimo) && ultimo != null)
+                candidatos.Add(ultimo);
+
+            if (!candidatos.Any())
+            {
+                return new Catherine
+                {
+                    Pregunta = mensaje,
+                    Respuesta = "No he identificado el nombre del gato. Dime el nombre exacto (aunque tenga alguna falta lo intentaré reconocer).",
+                    Resultados = new List<Gato>()
+                };
+            }
+
+            if (candidatos.Count > 1)
+            {
+                var nombres = string.Join(", ", candidatos.Take(5).Select(c => c.Nombre_Gato));
+                return new Catherine
+                {
+                    Pregunta = mensaje,
+                    Respuesta = $"¿Te refieres a {nombres}? Dime cuál exactamente para decirte su protectora.",
+                    Resultados = new List<Gato>()
+                };
+            }
+
+            var gato = candidatos[0];
+            _cache.Set(CACHE_LAST_CAT, gato, LAST_CAT_TTL);
+
+            // 2) con el Id_Protectora del gato, buscamos la protectora y devolvemos su nombre
+            var protectorAs = await ObtenerTodasProtectorasAsync();
+            var prot = protectorAs.FirstOrDefault(p => p.Id_Protectora == gato.Id_Protectora);
+
+            var nombreProt = prot?.Nombre_Protectora?.Trim();
+            var textoProt = string.IsNullOrWhiteSpace(nombreProt)
+                ? "No tengo registrada la protectora de ese gato ahora mismo."
+                : $"{gato.Nombre_Gato} pertenece a la protectora {nombreProt}.";
+
+            return new Catherine
+            {
+                Pregunta = mensaje,
+                Respuesta = textoProt,
+                Resultados = new List<Gato>()
+            };
         }
     }
 
