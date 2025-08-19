@@ -1,4 +1,4 @@
-using Models;                         // <- Catherine vive en Models
+using Models;                         // Catherine vive en Models
 using ProtectoraAPI.Repositories;
 
 namespace ProtectoraAPI.Services
