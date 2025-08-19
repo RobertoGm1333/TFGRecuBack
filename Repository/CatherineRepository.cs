@@ -60,6 +60,14 @@ private static readonly Regex _rxPerteneceProtectora = new(
      |a\s*qui[eé]n\s*pertenece
      |de\s*qui[eé]n\s*es)",
     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.IgnorePatternWhitespace);
+
+// >>> NUEVO: intención amplia de adopción (“quiero adoptar a X”, “me gustaría adoptar…”, “adoptar X”, “me lo llevo”, etc.)
+private static readonly Regex _rxAdopcion = new(
+    @"\b(quiero|quisiera|me\s+gustar[ií]a|deseo|voy\s+a|me\s+lo\s+llev[oa]|querr[ií]a|estoy\s+interesad[oa]\s+en)\b.*\b(adoptar|adopci[oó]n|llevarme|quedarme|acoger)\b
+     |\b(adoptar|adopci[oó]n)\b.*\b(a|de|del|al)\b
+     |\bme\s+lo\s+llev[oa]\b",
+    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.IgnorePatternWhitespace);
+
         // COLORES/RAZAS base + alias y plurales
         private static readonly Dictionary<string, string[]> COLORES_ALIASES = new()
         {
@@ -127,6 +135,14 @@ private static readonly Regex _rxPerteneceProtectora = new(
                 if (resPert is not null) return resPert;
                 // si no lo encontramos, seguimos con el flujo normal
             }
+
+// >>> NUEVO: intención de adopción (amplia)
+if (_rxAdopcion.IsMatch(mensaje))
+{
+    var resAdop = await ResolverAdopcionAsync(mensaje);
+    if (resAdop is not null) return resAdop;
+    // si no lo encontramos, seguimos con el flujo normal
+}
 
             // 1) ¿Pregunta por protectoras?
             var prot = await IntentaResponderProtectoraAsync(mensaje);
@@ -424,9 +440,36 @@ private static readonly Regex _rxPerteneceProtectora = new(
                 ? "No tenemos una descripción disponible por ahora."
                 : p.Descripcion_Protectora.Trim();
 
+// >>> NUEVO: obtener correo de contacto por reflexión para no romper el modelo
+string? correo = null;
+try
+{
+    var t = p.GetType();
+    foreach (var propName in new[] { "Email", "Correo", "Correo_Protectora", "Email_Protectora", "Mail" })
+    {
+        var pr = t.GetProperty(propName);
+        if (pr != null)
+        {
+            var val = pr.GetValue(p) as string;
+            if (!string.IsNullOrWhiteSpace(val))
+            {
+                correo = val.Trim();
+                break;
+            }
+        }
+    }
+}
+catch { /* ignorar */ }
+
             var sb = new StringBuilder();
             sb.Append($"{p.Nombre_Protectora} está en {ciudad}. ");
             sb.Append(resumen);
+
+            if (!string.IsNullOrWhiteSpace(correo))
+            {
+                sb.Append(" ");
+                sb.Append($"Medio de contacto: {correo}.");
+            }
 
             if (gatos.Any())
             {
@@ -883,6 +926,83 @@ private static readonly Regex _rxPerteneceProtectora = new(
                 Resultados = new List<Gato>()
             };
         }
+
+// >>> NUEVO: resolver intención de adopción (mensaje + contacto)
+private async Task<Catherine?> ResolverAdopcionAsync(string mensaje)
+{
+    var gatos = await ObtenerTodosLosGatosAsync();
+    var idxNombres = ObtenerIndiceNombres(gatos);
+    var candidatos = BuscarGatosPorNombreFuzzy(gatos, idxNombres, mensaje).ToList();
+
+    if (!candidatos.Any() && _cache.TryGetValue(CACHE_LAST_CAT, out Gato? ultimo) && ultimo != null)
+        candidatos.Add(ultimo);
+
+    if (!candidatos.Any())
+    {
+        return new Catherine
+        {
+            Pregunta = mensaje,
+            Respuesta = "¡Genial! Dime el nombre del gato que quieres adoptar y te doy el contacto de su protectora.",
+            Resultados = new List<Gato>()
+        };
+    }
+
+    if (candidatos.Count > 1)
+    {
+        var nombres = string.Join(", ", candidatos.Take(5).Select(c => c.Nombre_Gato));
+        return new Catherine
+        {
+            Pregunta = mensaje,
+            Respuesta = $"¿A cuál te refieres para iniciar la adopción: {nombres}?",
+            Resultados = new List<Gato>()
+        };
+    }
+
+    var gato = candidatos[0];
+    _cache.Set(CACHE_LAST_CAT, gato, LAST_CAT_TTL);
+
+    var protectorAs = await ObtenerTodasProtectorasAsync();
+    var prot = protectorAs.FirstOrDefault(p => p.Id_Protectora == gato.Id_Protectora);
+
+    string nombreProt = prot?.Nombre_Protectora?.Trim() ?? "su protectora";
+    string? correo = null;
+
+    try
+    {
+        if (prot != null)
+        {
+            var t = prot.GetType();
+            foreach (var propName in new[] { "Email", "Correo", "Correo_Protectora", "Email_Protectora", "Mail" })
+            {
+                var pr = t.GetProperty(propName);
+                if (pr != null)
+                {
+                    var val = pr.GetValue(prot) as string;
+                    if (!string.IsNullOrWhiteSpace(val))
+                    {
+                        correo = val.Trim();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    catch { /* ignorar */ }
+
+    var contacto = !string.IsNullOrWhiteSpace(correo)
+        ? $"usando este correo: {correo}"
+        : "a través de su medio de contacto habitual";
+
+    var texto = $"¡Genial! Si deseas adoptar a {gato.Nombre_Gato} puedes ponerte en contacto con la protectora {nombreProt} {contacto} o mediante el formulario de adopción en la página de detalles del gato.";
+
+    return new Catherine
+    {
+        Pregunta = mensaje,
+        Respuesta = texto,
+        Resultados = new List<Gato>()
+    };
+}
+
     }
 
     internal static class CatherineStringHelpers
