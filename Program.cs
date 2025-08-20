@@ -23,6 +23,10 @@ builder.Services.AddScoped<IDeseadoRepository, DeseadoRepository>(provider =>
 builder.Services.AddScoped<ISolicitudAdopcionRepository, SolicitudAdopcionRepository>(provider =>
     new SolicitudAdopcionRepository(connectionString));
 
+// NUEVO: Adopcion
+builder.Services.AddScoped<IAdopcionRepository, AdopcionRepository>(provider =>
+    new AdopcionRepository(connectionString));
+
 // Repositorio Catherine (IA) + HttpClient con timeout desde appsettings
 builder.Services.AddHttpClient<ICatherineRepository, CatherineRepository>(client =>
 {
@@ -48,6 +52,10 @@ builder.Services.AddScoped<IDeseadoService, DeseadoService>(provider =>
 
 builder.Services.AddScoped<ISolicitudAdopcionService, SolicitudAdopcionService>(provider =>
     new SolicitudAdopcionService(provider.GetRequiredService<ISolicitudAdopcionRepository>()));
+
+// NUEVO: Adopcion
+builder.Services.AddScoped<IAdopcionService, AdopcionService>(provider =>
+    new AdopcionService(provider.GetRequiredService<IAdopcionRepository>()));
 
 // Servicio Catherine (IA)
 builder.Services.AddScoped<ICatherineService, CatherineService>();
