@@ -156,3 +156,17 @@ CREATE TABLE SolicitudAdopcion (
     FOREIGN KEY (Id_Usuario) REFERENCES Usuario(Id_Usuario),
     FOREIGN KEY (Id_Gato) REFERENCES Gato(Id_Gato)
 );
+
+-- NUEVA Tabla Adopcion (reemplazo completo)
+CREATE TABLE Adopcion (
+    Id_Adopcion INT IDENTITY(1,1) PRIMARY KEY,
+    Id_Protectora INT NOT NULL,
+    Id_Gato INT NOT NULL,
+    Fecha_Adopcion DATETIME NOT NULL DEFAULT GETDATE(),
+    OrigenWeb  BIT NOT NULL DEFAULT 0,
+    Telefono_Adoptante VARCHAR(20),
+    Observaciones VARCHAR(1000)  NULL,
+    FOREIGN KEY (Id_Protectora) REFERENCES Protectora(Id_Protectora),
+    FOREIGN KEY (Id_Gato) REFERENCES Gato(Id_Gato)
+);
+
