@@ -156,4 +156,3 @@ CREATE TABLE SolicitudAdopcion (
     FOREIGN KEY (Id_Usuario) REFERENCES Usuario(Id_Usuario),
     FOREIGN KEY (Id_Gato) REFERENCES Gato(Id_Gato)
 );
-
