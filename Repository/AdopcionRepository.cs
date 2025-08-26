@@ -20,9 +20,10 @@ namespace ProtectoraAPI.Repositories
 
         public async Task<IEnumerable<Adopcion>> GetAllAsync()
         {
-            const string sql = @"SELECT Id_Adopcion, Id_Protectora, Id_Gato, Fecha_Adopcion, OrigenWeb, Telefono_Adoptante, Observaciones
-                                 FROM Adopcion
-                                 ORDER BY Fecha_Adopcion DESC";
+            const string sql = @"
+SELECT Id_Adopcion, Id_Protectora, Id_Gato, Fecha_Adopcion, OrigenWeb, Telefono_Adoptante, Observaciones
+FROM Adopcion
+ORDER BY Fecha_Adopcion DESC";
             using var cn = GetConn();
             await cn.OpenAsync();
             using var cmd = new SqlCommand(sql, cn);
@@ -46,8 +47,10 @@ namespace ProtectoraAPI.Repositories
 
         public async Task<Adopcion?> GetByIdAsync(int id)
         {
-            const string sql = @"SELECT Id_Adopcion, Id_Protectora, Id_Gato, Fecha_Adopcion, OrigenWeb, Telefono_Adoptante, Observaciones
-                                 FROM Adopcion WHERE Id_Adopcion=@id";
+            const string sql = @"
+SELECT Id_Adopcion, Id_Protectora, Id_Gato, Fecha_Adopcion, OrigenWeb, Telefono_Adoptante, Observaciones
+FROM Adopcion
+WHERE Id_Adopcion = @id";
             using var cn = GetConn();
             await cn.OpenAsync();
             using var cmd = new SqlCommand(sql, cn);
@@ -69,32 +72,66 @@ namespace ProtectoraAPI.Repositories
             return null;
         }
 
+        // INSERT + marcar Gato.Visible = 0 en una única transacción
         public async Task<int> CreateAsync(Adopcion item)
         {
-            const string sql = @"INSERT INTO Adopcion
-                                 (Id_Protectora, Id_Gato, Fecha_Adopcion, OrigenWeb, Telefono_Adoptante, Observaciones)
-                                 OUTPUT INSERTED.Id_Adopcion
-                                 VALUES (@p, @g, @f, @o, @t, @obs)";
+            const string sqlInsert = @"
+INSERT INTO Adopcion (Id_Protectora, Id_Gato, Fecha_Adopcion, OrigenWeb, Telefono_Adoptante, Observaciones)
+OUTPUT INSERTED.Id_Adopcion
+VALUES (@p, @g, @f, @o, @t, @obs);";
+
+            const string sqlHideCat = @"UPDATE Gato SET Visible = 0 WHERE Id_Gato = @g;";
+
             using var cn = GetConn();
             await cn.OpenAsync();
-            using var cmd = new SqlCommand(sql, cn);
-            cmd.Parameters.AddRange(new[]
+
+            using var tx = await cn.BeginTransactionAsync();
+
+            try
             {
-                new SqlParameter("@p", SqlDbType.Int){ Value = item.Id_Protectora },
-                new SqlParameter("@g", SqlDbType.Int){ Value = item.Id_Gato },
-                new SqlParameter("@f", SqlDbType.DateTime){ Value = item.Fecha_Adopcion == default ? DateTime.Now : item.Fecha_Adopcion },
-                new SqlParameter("@o", SqlDbType.Bit){ Value = item.OrigenWeb },
-                new SqlParameter("@t", SqlDbType.VarChar, 20){ Value = (object?)item.Telefono_Adoptante ?? DBNull.Value },
-                new SqlParameter("@obs", SqlDbType.VarChar, 1000){ Value = (object?)item.Observaciones ?? DBNull.Value },
-            });
-            return (int)await cmd.ExecuteScalarAsync();
+                int newId;
+                using (var cmd = new SqlCommand(sqlInsert, cn, (SqlTransaction)tx))
+                {
+                    cmd.Parameters.AddRange(new[]
+                    {
+                        new SqlParameter("@p", SqlDbType.Int){ Value = item.Id_Protectora },
+                        new SqlParameter("@g", SqlDbType.Int){ Value = item.Id_Gato },
+                        new SqlParameter("@f", SqlDbType.DateTime){ Value = item.Fecha_Adopcion == default ? DateTime.Now : item.Fecha_Adopcion },
+                        new SqlParameter("@o", SqlDbType.Bit){ Value = item.OrigenWeb },
+                        new SqlParameter("@t", SqlDbType.VarChar, 20){ Value = (object?)item.Telefono_Adoptante ?? DBNull.Value },
+                        new SqlParameter("@obs", SqlDbType.VarChar, 1000){ Value = (object?)item.Observaciones ?? DBNull.Value },
+                    });
+
+                    newId = (int)await cmd.ExecuteScalarAsync();
+                }
+
+                using (var cmd = new SqlCommand(sqlHideCat, cn, (SqlTransaction)tx))
+                {
+                    cmd.Parameters.Add(new SqlParameter("@g", SqlDbType.Int) { Value = item.Id_Gato });
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                await tx.CommitAsync();
+                return newId;
+            }
+            catch
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
         }
 
         public async Task<bool> UpdateAsync(Adopcion item)
         {
-            const string sql = @"UPDATE Adopcion
-                                 SET Id_Protectora=@p, Id_Gato=@g, Fecha_Adopcion=@f, OrigenWeb=@o, Telefono_Adoptante=@t, Observaciones=@obs
-                                 WHERE Id_Adopcion=@id";
+            const string sql = @"
+UPDATE Adopcion
+SET Id_Protectora = @p,
+    Id_Gato       = @g,
+    Fecha_Adopcion= @f,
+    OrigenWeb     = @o,
+    Telefono_Adoptante = @t,
+    Observaciones = @obs
+WHERE Id_Adopcion = @id";
             using var cn = GetConn();
             await cn.OpenAsync();
             using var cmd = new SqlCommand(sql, cn);
@@ -113,7 +150,7 @@ namespace ProtectoraAPI.Repositories
 
         public async Task<bool> DeleteAsync(int id)
         {
-            const string sql = @"DELETE FROM Adopcion WHERE Id_Adopcion=@id";
+            const string sql = @"DELETE FROM Adopcion WHERE Id_Adopcion = @id";
             using var cn = GetConn();
             await cn.OpenAsync();
             using var cmd = new SqlCommand(sql, cn);
@@ -124,16 +161,16 @@ namespace ProtectoraAPI.Repositories
         public async Task<IEnumerable<AdopcionListadoDTO>> GetListadoGeneralAsync()
         {
             const string sql = @"
-                SELECT 
-                    a.Id_Gato,
-                    a.Id_Protectora,
-                    a.Fecha_Adopcion AS Fecha,
-                    a.OrigenWeb,
-                    g.Imagen_Gato,
-                    a.Telefono_Adoptante
-                FROM Adopcion a
-                INNER JOIN Gato g ON g.Id_Gato = a.Id_Gato
-                ORDER BY a.Fecha_Adopcion DESC;";
+SELECT 
+    a.Id_Gato,
+    a.Id_Protectora,
+    a.Fecha_Adopcion AS Fecha,
+    a.OrigenWeb,
+    g.Imagen_Gato,
+    a.Telefono_Adoptante
+FROM Adopcion a
+INNER JOIN Gato g ON g.Id_Gato = a.Id_Gato
+ORDER BY a.Fecha_Adopcion DESC;";
             using var cn = GetConn();
             await cn.OpenAsync();
             using var cmd = new SqlCommand(sql, cn);
