@@ -3,6 +3,7 @@ using ProtectoraAPI.Repositories;
 using ProtectoraAPI.Services;
 using Microsoft.Extensions.FileProviders;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Http.Features;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("GatosDB");
@@ -73,7 +74,7 @@ builder.Services.AddCors(options =>
         });
 });
 
-// Agregar controladores con opciones para manejar referencias circulares
+// Controladores + JSON
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -81,13 +82,20 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
     });
 
-// Configuración Swagger
+// Aumentar límites para multipart (subida de imágenes)
+builder.Services.Configure<FormOptions>(o =>
+{
+    o.MultipartBodyLengthLimit = 104857600; // 100 MB
+    o.ValueLengthLimit = int.MaxValue;
+    o.MemoryBufferThreshold = int.MaxValue;
+});
+
+// Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
  
-// Configuración del pipeline HTTP
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -95,7 +103,6 @@ if (app.Environment.IsDevelopment())
     app.UseDeveloperExceptionPage();
 }
 
-// Configurar CORS
 app.UseCors(builder => builder
     .AllowAnyOrigin()
     .AllowAnyMethod()
@@ -104,8 +111,8 @@ app.UseCors(builder => builder
 app.UseHttpsRedirection();
 app.UseAuthorization();
 
-// Archivos estáticos
-app.UseStaticFiles(); // Para wwwroot
+// Archivos estáticos (wwwroot)
+app.UseStaticFiles();
 
 app.MapControllers();
 
