@@ -9,7 +9,6 @@ namespace ProtectoraAPI.Services
         Task AddAsync(Evento evento);
         Task UpdateAsync(Evento evento);
         Task DeleteAsync(int id);
-
         Task<IEnumerable<Evento>> ObtenerPorProtectoraAsync(int idProtectora);
     }
 }

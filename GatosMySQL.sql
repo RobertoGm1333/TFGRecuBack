@@ -179,5 +179,6 @@ CREATE TABLE Eventos (
     Hora_Evento TIME NOT NULL,
     Descripcion_Evento VARCHAR(1000) NOT NULL,
     EnclaceMaps VARCHAR(5000),
+    Foto_Evento VARCHAR(5000),
     FOREIGN KEY (Id_Protectora) REFERENCES Protectora(Id_Protectora)
 );

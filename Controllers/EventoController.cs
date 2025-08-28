@@ -1,9 +1,8 @@
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using System.IO;
 using Microsoft.AspNetCore.Mvc;
-using ProtectoraAPI.Services;
+using Microsoft.AspNetCore.Http;
 using Models;
+using ProtectoraAPI.Services;
 
 namespace ProtectoraAPI.Controllers
 {
@@ -12,10 +11,12 @@ namespace ProtectoraAPI.Controllers
     public class EventoController : ControllerBase
     {
         private readonly IEventoService _service;
+        private readonly IWebHostEnvironment _env;
 
-        public EventoController(IEventoService service)
+        public EventoController(IEventoService service, IWebHostEnvironment env)
         {
             _service = service;
+            _env = env;
         }
 
         [HttpGet]
@@ -33,32 +34,84 @@ namespace ProtectoraAPI.Controllers
             return Ok(ev);
         }
 
-        [HttpPost]
-        public async Task<ActionResult<Evento>> CreateEvento([FromBody] Evento ev)
+        [HttpGet("protectora/{idProtectora}")]
+        public async Task<IActionResult> GetEventosPorProtectora(int idProtectora)
         {
-            if (ev == null) return BadRequest("Datos vacíos.");
+            var eventos = await _service.ObtenerPorProtectoraAsync(idProtectora);
+            return Ok(eventos);
+        }
 
-            // Normalización ligera
-            ev.Fecha = ev.Fecha.Date;
-            ev.Hora  = new System.TimeSpan(ev.Hora.Hours, ev.Hora.Minutes, 0);
+        // CREATE con subida de foto (multipart/form-data)
+        [HttpPost]
+        [RequestSizeLimit(104_857_600)] // 100 MB
+        public async Task<ActionResult<Evento>> CreateEvento(
+            [FromForm] int Id_Protectora,
+            [FromForm] string Nombre_Evento,
+            [FromForm] string Lugar,
+            [FromForm] DateTime Fecha_Evento,
+            [FromForm] TimeSpan Hora_Evento,
+            [FromForm] string Descripcion_Evento,
+            [FromForm] string? EnclaceMaps,
+            [FromForm] IFormFile? Foto // ← archivo opcional
+        )
+        {
+            var ev = new Evento
+            {
+                Id_Protectora = Id_Protectora,
+                Nombre_Evento = Nombre_Evento,
+                Lugar = Lugar,
+                Fecha_Evento = Fecha_Evento.Date,
+                Hora_Evento = new TimeSpan(Hora_Evento.Hours, Hora_Evento.Minutes, 0),
+                Descripcion_Evento = Descripcion_Evento,
+                EnclaceMaps = EnclaceMaps
+            };
+
+            if (Foto is not null && Foto.Length > 0)
+                ev.Foto_Evento = await GuardarFotoAsync(Foto);
 
             await _service.AddAsync(ev);
             return CreatedAtAction(nameof(GetEvento), new { id = ev.Id_Evento }, ev);
         }
 
+        // UPDATE con opción de nueva foto (multipart/form-data)
         [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateEvento(int id, [FromBody] Evento ev)
+        [RequestSizeLimit(104_857_600)] // 100 MB
+        public async Task<IActionResult> UpdateEvento(
+            int id,
+            [FromForm] int Id_Protectora,
+            [FromForm] string Nombre_Evento,
+            [FromForm] string Lugar,
+            [FromForm] DateTime Fecha_Evento,
+            [FromForm] TimeSpan Hora_Evento,
+            [FromForm] string Descripcion_Evento,
+            [FromForm] string? EnclaceMaps,
+            [FromForm] IFormFile? Foto // ← si llega, se reemplaza
+        )
         {
             var existente = await _service.GetByIdAsync(id);
-            if (existente == null) return NotFound();
+            if (existente is null) return NotFound();
 
-            // Mantener Id
-            ev.Id_Evento = id;
+            existente.Id_Protectora = Id_Protectora;
+            existente.Nombre_Evento = Nombre_Evento;
+            existente.Lugar = Lugar;
+            existente.Fecha_Evento = Fecha_Evento.Date;
+            existente.Hora_Evento = new TimeSpan(Hora_Evento.Hours, Hora_Evento.Minutes, 0);
+            existente.Descripcion_Evento = Descripcion_Evento;
+            existente.EnclaceMaps = EnclaceMaps;
 
-            ev.Fecha = ev.Fecha.Date;
-            ev.Hora  = new System.TimeSpan(ev.Hora.Hours, ev.Hora.Minutes, 0);
+            if (Foto is not null && Foto.Length > 0)
+            {
+                // opcional: borrar la foto previa si existe en disco
+                if (!string.IsNullOrWhiteSpace(existente.Foto_Evento))
+                {
+                    var absOld = Path.Combine(_env.WebRootPath, existente.Foto_Evento.Replace('/', Path.DirectorySeparatorChar));
+                    if (System.IO.File.Exists(absOld)) System.IO.File.Delete(absOld);
+                }
 
-            await _service.UpdateAsync(ev);
+                existente.Foto_Evento = await GuardarFotoAsync(Foto);
+            }
+
+            await _service.UpdateAsync(existente);
             return NoContent();
         }
 
@@ -66,20 +119,37 @@ namespace ProtectoraAPI.Controllers
         public async Task<IActionResult> DeleteEvento(int id)
         {
             var existente = await _service.GetByIdAsync(id);
-            if (existente == null) return NotFound();
+            if (existente is null) return NotFound();
+
+            // opcional: borrar la imagen en disco
+            if (!string.IsNullOrWhiteSpace(existente.Foto_Evento))
+            {
+                var absOld = Path.Combine(_env.WebRootPath, existente.Foto_Evento.Replace('/', Path.DirectorySeparatorChar));
+                if (System.IO.File.Exists(absOld)) System.IO.File.Delete(absOld);
+            }
 
             await _service.DeleteAsync(id);
             return NoContent();
         }
 
-        [HttpGet("protectora/{idProtectora}")]
-        public async Task<IActionResult> GetEventosPorProtectora(int idProtectora)
+        // ===== Helpers =====
+        private async Task<string> GuardarFotoAsync(IFormFile file)
         {
-            var eventos = await _service.ObtenerPorProtectoraAsync(idProtectora);
-            if (eventos == null || !eventos.Any())
-                return NotFound("No se encontraron eventos para esta protectora.");
+            var folderRel = Path.Combine("Images", "Eventos"); // ruta relativa que servirá StaticFiles
+            var folderAbs = Path.Combine(_env.WebRootPath, folderRel);
 
-            return Ok(eventos);
+            if (!Directory.Exists(folderAbs))
+                Directory.CreateDirectory(folderAbs);
+
+            var ext = Path.GetExtension(file.FileName);
+            var fileName = $"{Guid.NewGuid():N}{ext}";
+            var absPath = Path.Combine(folderAbs, fileName);
+
+            using (var stream = new FileStream(absPath, FileMode.Create))
+                await file.CopyToAsync(stream);
+
+            // devolver ruta relativa con separador web
+            return Path.Combine(folderRel, fileName).Replace("\\", "/");
         }
     }
 }

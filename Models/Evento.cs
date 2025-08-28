@@ -9,13 +9,11 @@ namespace Models
 
         public string Nombre_Evento { get; set; } = "";
         public string Lugar { get; set; } = "";
-        public string? Direccion { get; set; }
+        public DateTime Fecha_Evento { get; set; }   
+        public TimeSpan Hora_Evento { get; set; }    
 
-        public DateTime Fecha { get; set; }   
-        public TimeSpan Hora { get; set; }    
-        public string? Descripcion { get; set; }
-        public string? Enlace_Maps { get; set; }
-
-        public bool Visible { get; set; } = true;
+        public string Descripcion_Evento { get; set; } = "";
+        public string? EnclaceMaps { get; set; }    
+        public string? Foto_Evento { get; set; }     
     }
 }

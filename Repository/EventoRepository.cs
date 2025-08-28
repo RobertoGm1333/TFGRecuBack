@@ -7,7 +7,7 @@ namespace ProtectoraAPI.Repositories
     public class EventoRepository : IEventoRepository
     {
         private readonly string _connectionString;
-        private const string Table = "[dbo].[Eventos]"; // <- usa el nombre real de tu tabla
+        private const string Table = "[dbo].[Eventos]";
 
         public EventoRepository(string connectionString)
         {
@@ -17,7 +17,6 @@ namespace ProtectoraAPI.Repositories
         public async Task<List<Evento>> GetAllAsync()
         {
             var eventos = new List<Evento>();
-
             using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
 
@@ -36,7 +35,7 @@ namespace ProtectoraAPI.Repositories
             using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
 
-            var query = $"SELECT * FROM {Table} WHERE IdEvento = @Id";
+            var query = $"SELECT * FROM {Table} WHERE Id_Evento = @Id";
             using var command = new SqlCommand(query, connection);
             command.Parameters.AddWithValue("@Id", id);
 
@@ -53,22 +52,21 @@ namespace ProtectoraAPI.Repositories
 
             var query = $@"
 INSERT INTO {Table}
-    (IdProtectora, NombreEvento, Lugar, Direccion, Fecha, Hora, Descripcion, EnlaceMaps, Visible)
-OUTPUT INSERTED.IdEvento
+    (Id_Protectora, Nombre_Evento, Lugar, Fecha_Evento, Hora_Evento, Descripcion_Evento, EnclaceMaps, Foto_Evento)
+OUTPUT INSERTED.Id_Evento
 VALUES
-    (@IdProtectora, @NombreEvento, @Lugar, @Direccion, @Fecha, @Hora, @Descripcion, @EnlaceMaps, @Visible);";
+    (@Id_Protectora, @Nombre_Evento, @Lugar, @Fecha_Evento, @Hora_Evento, @Descripcion_Evento, @EnclaceMaps, @Foto_Evento);";
 
             using var command = new SqlCommand(query, connection);
 
-            command.Parameters.AddWithValue("@IdProtectora", evento.Id_Protectora);
-            command.Parameters.AddWithValue("@NombreEvento", evento.Nombre_Evento);
+            command.Parameters.AddWithValue("@Id_Protectora", evento.Id_Protectora);
+            command.Parameters.AddWithValue("@Nombre_Evento", evento.Nombre_Evento);
             command.Parameters.AddWithValue("@Lugar", evento.Lugar);
-            command.Parameters.AddWithValue("@Direccion", (object?)evento.Direccion ?? DBNull.Value);
-            command.Parameters.AddWithValue("@Fecha", evento.Fecha.Date);
-            command.Parameters.Add("@Hora", SqlDbType.Time).Value = evento.Hora;
-            command.Parameters.AddWithValue("@Descripcion", (object?)evento.Descripcion ?? DBNull.Value);
-            command.Parameters.AddWithValue("@EnlaceMaps", (object?)evento.Enlace_Maps ?? DBNull.Value);
-            command.Parameters.AddWithValue("@Visible", evento.Visible);
+            command.Parameters.AddWithValue("@Fecha_Evento", evento.Fecha_Evento.Date);
+            command.Parameters.Add("@Hora_Evento", SqlDbType.Time).Value = evento.Hora_Evento;
+            command.Parameters.AddWithValue("@Descripcion_Evento", evento.Descripcion_Evento);
+            command.Parameters.AddWithValue("@EnclaceMaps", (object?)evento.EnclaceMaps ?? DBNull.Value);
+            command.Parameters.AddWithValue("@Foto_Evento", (object?)evento.Foto_Evento ?? DBNull.Value);
 
             var idGenerado = await command.ExecuteScalarAsync();
             if (idGenerado != null)
@@ -82,29 +80,27 @@ VALUES
 
             var query = $@"
 UPDATE {Table} SET
-    IdProtectora = @IdProtectora,
-    NombreEvento = @NombreEvento,
+    Id_Protectora = @Id_Protectora,
+    Nombre_Evento = @Nombre_Evento,
     Lugar = @Lugar,
-    Direccion = @Direccion,
-    Fecha = @Fecha,
-    Hora = @Hora,
-    Descripcion = @Descripcion,
-    EnlaceMaps = @EnlaceMaps,
-    Visible = @Visible
-WHERE IdEvento = @IdEvento;";
+    Fecha_Evento = @Fecha_Evento,
+    Hora_Evento = @Hora_Evento,
+    Descripcion_Evento = @Descripcion_Evento,
+    EnclaceMaps = @EnclaceMaps,
+    Foto_Evento = @Foto_Evento
+WHERE Id_Evento = @Id_Evento;";
 
             using var command = new SqlCommand(query, connection);
 
-            command.Parameters.AddWithValue("@IdEvento", evento.Id_Evento);
-            command.Parameters.AddWithValue("@IdProtectora", evento.Id_Protectora);
-            command.Parameters.AddWithValue("@NombreEvento", evento.Nombre_Evento);
+            command.Parameters.AddWithValue("@Id_Evento", evento.Id_Evento);
+            command.Parameters.AddWithValue("@Id_Protectora", evento.Id_Protectora);
+            command.Parameters.AddWithValue("@Nombre_Evento", evento.Nombre_Evento);
             command.Parameters.AddWithValue("@Lugar", evento.Lugar);
-            command.Parameters.AddWithValue("@Direccion", (object?)evento.Direccion ?? DBNull.Value);
-            command.Parameters.AddWithValue("@Fecha", evento.Fecha.Date);
-            command.Parameters.Add("@Hora", SqlDbType.Time).Value = evento.Hora;
-            command.Parameters.AddWithValue("@Descripcion", (object?)evento.Descripcion ?? DBNull.Value);
-            command.Parameters.AddWithValue("@EnlaceMaps", (object?)evento.Enlace_Maps ?? DBNull.Value);
-            command.Parameters.AddWithValue("@Visible", evento.Visible);
+            command.Parameters.AddWithValue("@Fecha_Evento", evento.Fecha_Evento.Date);
+            command.Parameters.Add("@Hora_Evento", SqlDbType.Time).Value = evento.Hora_Evento;
+            command.Parameters.AddWithValue("@Descripcion_Evento", evento.Descripcion_Evento);
+            command.Parameters.AddWithValue("@EnclaceMaps", (object?)evento.EnclaceMaps ?? DBNull.Value);
+            command.Parameters.AddWithValue("@Foto_Evento", (object?)evento.Foto_Evento ?? DBNull.Value);
 
             await command.ExecuteNonQueryAsync();
         }
@@ -114,7 +110,7 @@ WHERE IdEvento = @IdEvento;";
             using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
 
-            var query = $"DELETE FROM {Table} WHERE IdEvento = @Id";
+            var query = $"DELETE FROM {Table} WHERE Id_Evento = @Id";
             using var command = new SqlCommand(query, connection);
             command.Parameters.AddWithValue("@Id", id);
 
@@ -124,11 +120,10 @@ WHERE IdEvento = @IdEvento;";
         public async Task<IEnumerable<Evento>> ObtenerPorProtectoraAsync(int idProtectora)
         {
             var eventos = new List<Evento>();
-
             using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
 
-            var query = $"SELECT * FROM {Table} WHERE IdProtectora = @IdProtectora";
+            var query = $"SELECT * FROM {Table} WHERE Id_Protectora = @IdProtectora";
             using var command = new SqlCommand(query, connection);
             command.Parameters.AddWithValue("@IdProtectora", idProtectora);
 
@@ -141,22 +136,19 @@ WHERE IdEvento = @IdEvento;";
 
         private static Evento Map(SqlDataReader rd)
         {
-            // columnas esperadas en la tabla: IdEvento, IdProtectora, NombreEvento, Lugar,
-            // Direccion, Fecha, Hora, Descripcion, EnlaceMaps, Visible
-            int ord(string n) => rd.GetOrdinal(n);
+            int o(string n) => rd.GetOrdinal(n);
 
             return new Evento
             {
-                Id_Evento     = rd.GetInt32(ord("IdEvento")),
-                Id_Protectora = rd.GetInt32(ord("IdProtectora")),
-                Nombre_Evento = rd.GetString(ord("NombreEvento")),
-                Lugar         = rd.GetString(ord("Lugar")),
-                Direccion     = rd.IsDBNull(ord("Direccion")) ? null : rd.GetString(ord("Direccion")),
-                Fecha         = rd.GetDateTime(ord("Fecha")),
-                Hora          = (TimeSpan)rd.GetValue(ord("Hora")),
-                Descripcion   = rd.IsDBNull(ord("Descripcion")) ? null : rd.GetString(ord("Descripcion")),
-                Enlace_Maps   = rd.IsDBNull(ord("EnlaceMaps")) ? null : rd.GetString(ord("EnlaceMaps")),
-                Visible       = rd.GetBoolean(ord("Visible"))
+                Id_Evento          = rd.GetInt32(o("Id_Evento")),
+                Id_Protectora      = rd.GetInt32(o("Id_Protectora")),
+                Nombre_Evento      = rd.GetString(o("Nombre_Evento")),
+                Lugar              = rd.GetString(o("Lugar")),
+                Fecha_Evento       = rd.GetDateTime(o("Fecha_Evento")),
+                Hora_Evento        = (TimeSpan)rd.GetValue(o("Hora_Evento")),
+                Descripcion_Evento = rd.GetString(o("Descripcion_Evento")),
+                EnclaceMaps        = rd.IsDBNull(o("EnclaceMaps")) ? null : rd.GetString(o("EnclaceMaps")),
+                Foto_Evento        = rd.IsDBNull(o("Foto_Evento")) ? null : rd.GetString(o("Foto_Evento")),
             };
         }
     }
