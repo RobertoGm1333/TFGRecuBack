@@ -170,3 +170,14 @@ CREATE TABLE Adopcion (
     FOREIGN KEY (Id_Gato) REFERENCES Gato(Id_Gato)
 );
 
+CREATE TABLE Eventos (
+    Id_Evento INT IDENTITY(1,1) PRIMARY KEY,
+    Id_Protectora INT NOT NULL,
+    Nombre_Evento VARCHAR(150) NOT NULL,
+    Lugar VARCHAR(150) NOT NULL,
+    Fecha_Evento DATE NOT NULL,
+    Hora_Evento TIME NOT NULL,
+    Descripcion_Evento VARCHAR(1000) NOT NULL,
+    EnclaceMaps VARCHAR(5000),
+    FOREIGN KEY (Id_Protectora) REFERENCES Protectora(Id_Protectora)
+);
