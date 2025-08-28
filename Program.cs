@@ -113,7 +113,7 @@ app.UseAuthorization();
 
 // Archivos estáticos (wwwroot)
 app.UseStaticFiles();
-
+ 
 app.MapControllers();
 
 app.Run();
