@@ -168,7 +168,7 @@ CREATE TABLE Adopcion (
     Observaciones VARCHAR(1000)  NULL,
     FOREIGN KEY (Id_Protectora) REFERENCES Protectora(Id_Protectora),
     FOREIGN KEY (Id_Gato) REFERENCES Gato(Id_Gato)
-);
+); 
 
 CREATE TABLE Eventos (
     Id_Evento INT IDENTITY(1,1) PRIMARY KEY,
