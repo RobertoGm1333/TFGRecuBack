@@ -63,7 +63,7 @@ CREATE TABLE Gato (
     Visible BIT NOT NULL DEFAULT 1,
     FOREIGN KEY (Id_Protectora) REFERENCES Protectora(Id_Protectora)
 );
-
+ 
 INSERT INTO Gato (Id_Protectora, Nombre_Gato, Raza, Edad, Esterilizado, Sexo, Descripcion_Gato, Descripcion_Gato_En, Imagen_Gato)
 VALUES 
 (2, 'Widow', 'Pardo', 4, 0, 'Macho', 'Al haber vivido mucho tiempo en la calle es algo desconfiado. Necesita que le den su espacio para no sentirse amenazado.', 'Having lived on the streets for a long time, he is somewhat distrustful. He needs his space to not feel threatened.', '/Images/gatos/Widow.png'),
